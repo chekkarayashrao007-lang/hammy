@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hammy Hamster Web - Full Mode</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px 16px;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 6px; color: #58a6ff; }
+    #status {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #3fb950;
+      margin-bottom: 12px;
+      min-height: 24px;
+    }
+    .controls { margin-bottom: 16px; }
+    button {
+      padding: 10px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid rgba(240, 246, 252, 0.1);
+      background: #238636;
+      color: #ffffff;
+      cursor: pointer;
+    }
+    button:hover { background: #2ea043; }
+    .container {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: 1000px;
+      width: 100%;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 470px;
+      height: 390px;
+    }
+    .card-title {
+      font-size: 0.85rem;
+      color: #8b949e;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .feed-box {
+      width: 100%;
+      flex: 1;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    img#reaction {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Hammy Hamster Live Web</h1>
+  <div id="status">Loading Vision Models...</div>
+
+  <div class="controls">
+    <button id="startBtn" disabled>Loading...</button>
+  </div>
+
+  <div class="container">
+    <div class="card">
+      <div class="card-title">Live Camera Feed</div>
+      <div class="feed-box">
+        <video id="webcam" autoplay playsinline muted></video>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Reaction Hamster</div>
+      <div class="feed-box">
+        <img id="reaction" src="images/pokerham.jpg" alt="Reaction Hamster" />
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      GestureRecognizer,
+      FaceLandmarker,
+      PoseLandmarker,
+      FilesetResolver
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+
+    const video = document.getElementById("webcam");
+    const reactionImg = document.getElementById("reaction");
+    const statusText = document.getElementById("status");
+    const startBtn = document.getElementById("startBtn");
+
+    let gestureRecognizer, faceLandmarker, poseLandmarker;
+    let lastVideoTime = -1;
+
+    // Direct repository assets
+    const images = {
+      poker: "images/pokerham.jpg",
+      thumbs_up: "images/thumb.jpg",
+      thumbs_down: "images/thumbs%20down.jpg",
+      lollipop: "images/happylollypop.webp",
+      glasses: "images/discord%20mod.jpg",
+      finger_mouth: "images/one%20finger%20mouth%20.jpg",
+      nerd: "images/nerd.jpg",
+      think: "images/think%20.jpg",
+      bicep: "images/bicep.jpg",
+      cross_arms: "images/cross%20arms%20.jpg",
+      truck: "images/cinamoroll%20ham.jpg",
+      side_eye: "images/sideyee.jpg"
+    };
+
+    function dist(p1, p2) {
+      return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+    }
+
+    async function initModels() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+
+        gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numHands: 2
+        });
+
+        faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+
+        poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numPoses: 1
+        });
+
+        statusText.innerText = "All models ready. Click 'Enable Camera'!";
+        startBtn.disabled = false;
+        startBtn.innerText = "Enable Camera";
+      } catch (err) {
+        statusText.innerText = "Model init error: " + err.message;
+        statusText.style.color = "#f85149";
+      }
+    }
+
+    startBtn.addEventListener("click", async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: "user" }
+        });
+        video.srcObject = stream;
+        video.addEventListener("loadeddata", () => {
+          startBtn.style.display = "none";
+          statusText.innerText = "Live detection running!";
+          renderLoop();
+        });
+      } catch (err) {
+        statusText.innerText = "Camera access error: " + err.message;
+        statusText.style.color = "#f85149";
+      }
+    });
+
+    async function renderLoop() {
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        const now = performance.now();
+
+        const gRes = gestureRecognizer.recognizeForVideo(video, now);
+        const fRes = faceLandmarker.detectForVideo(video, now);
+        const pRes = poseLandmarker.detectForVideo(video, now);
+
+        let activeGesture = "poker";
+        let label = "None (Poker Face)";
+
+        const handLandmarks = gRes.landmarks || [];
+        const gestures = gRes.gestures || [];
+        const faceLandmarks = fRes.faceLandmarks || [];
+        const poseLandmarks = pRes.landmarks || [];
+
+        const hasFace = faceLandmarks.length > 0;
+        const nose = hasFace ? faceLandmarks[0][1] : null;
+        const mouth = hasFace ? faceLandmarks[0][13] : null;
+        const leftCheek = hasFace ? faceLandmarks[0][234] : null;
+        const rightCheek = hasFace ? faceLandmarks[0][454] : null;
+
+        let isPinch = false;
+        let isFistNearHead = false;
+        let isFingerNearMouth = false;
+        let isPointerUp = false;
+        let isSteepledHands = false;
+
+        // Check steepled hands (think pose: both hands fingertips close together near mouth/chin)
+        if (handLandmarks.length >= 2) {
+          const h1Tip = handLandmarks[0][8]; // Hand 1 index
+          const h2Tip = handLandmarks[1][8]; // Hand 2 index
+          const h1Thumb = handLandmarks[0][4];
+          const h2Thumb = handLandmarks[1][4];
+          
+          const tipsClose = dist(h1Tip, h2Tip) < 0.15 || dist(h1Thumb, h2Thumb) < 0.15;
+          if (tipsClose && mouth && dist(h1Tip, mouth) < 0.3) {
+            isSteepledHands = true;
+          }
+        }
+
+        for (let i = 0; i < handLandmarks.length; i++) {
+          const lms = handLandmarks[i];
+          const thumbTip = lms[4];
+          const indexTip = lms[8];
+          const wrist = lms[0];
+
+          // Pinch detection
+          if (dist(thumbTip, indexTip) < 0.05) {
+            if (nose && (dist(indexTip, nose) < 0.25 || dist(wrist, nose) < 0.3)) {
+              isPinch = true;
+            }
+          }
+
+          // Fist near head
+          const isFist = gestures[i] && gestures[i][0].categoryName === "Closed_Fist";
+          if (isFist && hasFace) {
+            if (dist(wrist, leftCheek) < 0.25 || dist(wrist, rightCheek) < 0.25 || (wrist.y < mouth.y && Math.abs(wrist.x - nose.x) < 0.35)) {
+              isFistNearHead = true;
+            }
+          }
+
+          // Index finger pointing up vs near mouth
+          const indexUp = gestures[i] && (gestures[i][0].categoryName === "Pointing_Up" || (indexTip.y < lms[6].y && lms[12].y > lms[10].y));
+          if (indexUp && mouth) {
+            if (dist(indexTip, mouth) < 0.15) {
+              isFingerNearMouth = true;
+            } else {
+              isPointerUp = true;
+            }
+          }
+        }
+
+        const primaryGesture = gestures.length > 0 ? gestures[0][0].categoryName : "None";
+
+        // Pose checks (bicep / crossed arms)
+        let isCrossedArms = false;
+        let isBicep = false;
+        if (poseLandmarks.length > 0) {
+          const p = poseLandmarks[0];
+          const lw = p[15], rw = p[16], le = p[13], re = p[14], ls = p[11], rs = p[12];
+          
+          if (dist(lw, rw) < 0.18 && lw.y > ls.y && rw.y > rs.y && lw.y < p[23].y) {
+            isCrossedArms = true;
+          }
+          if ((rw.y < rs.y && re.x > rs.x) || (lw.y < ls.y && le.x < ls.x)) {
+            isBicep = true;
+          }
+        }
+
+        // Face yaw check (Side eye)
+        let isSideEye = false;
+        if (hasFace && nose && leftCheek && rightCheek) {
+          const dLeft = Math.abs(nose.x - leftCheek.x);
+          const dRight = Math.abs(nose.x - rightCheek.x);
+          if (dLeft / (dRight + 0.0001) > 2.2 || dRight / (dLeft + 0.0001) > 2.2) {
+            isSideEye = true;
+          }
+        }
+
+        // Priority resolution
+        if (isSteepledHands) {
+          activeGesture = "think";
+          label = "Steepled Hands / Scheming Hamster";
+        } else if (isPinch) {
+          activeGesture = "glasses";
+          label = "Glasses Pinch";
+        } else if (isFistNearHead) {
+          activeGesture = "lollipop";
+          label = "Fist by Head (Lollipop)";
+        } else if (primaryGesture === "Thumb_Up") {
+          activeGesture = "thumbs_up";
+          label = "Thumbs Up";
+        } else if (primaryGesture === "Thumb_Down") {
+          activeGesture = "thumbs_down";
+          label = "Thumbs Down";
+        } else if (isFingerNearMouth) {
+          activeGesture = "finger_mouth";
+          label = "Finger Near Mouth (Shh)";
+        } else if (isPointerUp || primaryGesture === "Pointing_Up") {
+          activeGesture = "nerd";
+          label = "Pointing Up (Nerd)";
+        } else if (handLandmarks.length >= 2) {
+          activeGesture = "truck";
+          label = "Two Hands Visible";
+        } else if (isCrossedArms) {
+          activeGesture = "cross_arms";
+          label = "Crossed Arms";
+        } else if (isBicep) {
+          activeGesture = "bicep";
+          label = "Bicep Flex";
+        } else if (isSideEye) {
+          activeGesture = "side_eye";
+          label = "Side-Eye Glance";
+        }
+
+        reactionImg.src = images[activeGesture];
+        statusText.innerText = `Detected: ${label}`;
+      }
+      requestAnimationFrame(renderLoop);
+    }
+
+    initModels();
+  </script>
+</body>
+</html>
